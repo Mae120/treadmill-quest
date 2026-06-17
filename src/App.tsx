@@ -1,7 +1,10 @@
 import { useState, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
 
-// ─── Persistent Storage Helpers ───────────────────────────────────────────────
-const STORAGE_KEY = "treadmill-quest-data";
+// ─── Supabase Configuration ──────────────────────────────────────────────────
+const SUPABASE_URL = "https://ldczvaiyavsgryotvutb.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_wIfa7iutZ8sHSYJv_0wkyQ_r01XyEkR";
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const defaultData = {
   goal: null,
@@ -12,17 +15,35 @@ const defaultData = {
 
 async function loadData() {
   try {
-    const r = await (window as any).storage?.get(STORAGE_KEY);
-    return r ? JSON.parse(r.value) : defaultData;
-  } catch {
+    const { data, error } = await supabase
+      .from('treadmill_quest')
+      .select('data')
+      .eq('user_id', 'default_user')
+      .single();
+    
+    if (error) {
+      console.error("Error loading from Supabase:", error);
+      return defaultData;
+    }
+    return data?.data || defaultData;
+  } catch (err) {
+    console.error("Fetch error:", err);
     return defaultData;
   }
 }
 
 async function saveData(data: any) {
   try {
-    await (window as any).storage?.set(STORAGE_KEY, JSON.stringify(data));
-  } catch {}
+    const { error } = await supabase
+      .from('treadmill_quest')
+      .upsert({ user_id: 'default_user', data: data }, { onConflict: 'user_id' });
+    
+    if (error) {
+      console.error("Error saving to Supabase:", error);
+    }
+  } catch (err) {
+    console.error("Save error:", err);
+  }
 }
 
 // ─── Virtual Journeys ─────────────────────────────────────────────────────────
@@ -77,7 +98,7 @@ const JOURNEYS = [
 const today = () => new Date().toISOString().split("T")[0];
 
 function getStreak(sessions: any[]) {
-  if (!sessions.length) return { current: 0, longest: 0 };
+  if (!sessions || !sessions.length) return { current: 0, longest: 0 };
   const dates = new Set(sessions.map((s: any) => s.date));
   let current = 0;
   let d = new Date();
@@ -101,6 +122,7 @@ function getStreak(sessions: any[]) {
 }
 
 function getMonthlyConsistency(sessions: any[]) {
+  if (!sessions) return 0;
   const now = new Date();
   const daysSoFar = now.getDate();
   const thisMonth = sessions.filter((s: any) => {
@@ -112,6 +134,7 @@ function getMonthlyConsistency(sessions: any[]) {
 }
 
 function getTotalKm(sessions: any[]) {
+  if (!sessions) return 0;
   return sessions.reduce((a: any, s: any) => a + (s.km || 2.4), 0);
 }
 
@@ -334,7 +357,7 @@ function CalendarMonth({ sessions }: { sessions: any[] }) {
   const month = now.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDay = new Date(year, month, 1).getDay();
-  const sessionDates = new Set(sessions.filter((s: any) => {
+  const sessionDates = new Set((sessions || []).filter((s: any) => {
     const d = new Date(s.date);
     return d.getFullYear() === year && d.getMonth() === month;
   }).map((s: any) => s.date));
@@ -462,14 +485,14 @@ export default function TreadmillQuest() {
 
   const handleLog = (duration: number) => {
     const todayStr = today();
-    const alreadyToday = data.sessions.some((s: any) => s.date === todayStr);
+    const alreadyToday = (data?.sessions || []).some((s: any) => s.date === todayStr);
     if (alreadyToday) {
       showToast("Already logged today! 🎉");
       setShowLog(false);
       return;
     }
     const session = { date: todayStr, duration, km: kmPerSession(duration), calories: calPerSession(duration) };
-    const updated = { ...data, sessions: [...data.sessions, session] };
+    const updated = { ...data, sessions: [...(data?.sessions || []), session] };
     setData(updated);
     saveData(updated);
     setShowLog(false);
@@ -494,9 +517,9 @@ export default function TreadmillQuest() {
   const totalKm = getTotalKm(data.sessions);
   const streak = getStreak(data.sessions);
   const consistency = getMonthlyConsistency(data.sessions);
-  const todayDone = data.sessions.some((s: any) => s.date === today());
-  const totalHours = data.sessions.reduce((a: any, s: any) => a + s.duration, 0) / 60;
-  const totalCalories = data.sessions.reduce((a: any, s: any) => a + s.calories, 0);
+  const todayDone = (data.sessions || []).some((s: any) => s.date === today());
+  const totalHours = (data.sessions || []).reduce((a: any, s: any) => a + s.duration, 0) / 60;
+  const totalCalories = (data.sessions || []).reduce((a: any, s: any) => a + s.calories, 0);
 
   const tabs = [
     { id: "home", label: "Home", icon: "🏠" },
@@ -591,7 +614,7 @@ export default function TreadmillQuest() {
           <div style={{ display: "flex", flexDirection: "column", gap: 16 } as any}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } as any}>
               {[
-                { label: "Total Sessions", value: data.sessions.length, unit: "", icon: "🏃" },
+                { label: "Total Sessions", value: (data.sessions || []).length, unit: "", icon: "🏃" },
                 { label: "Total Hours", value: totalHours.toFixed(1), unit: "h", icon: "⏱️" },
                 { label: "Total Distance", value: totalKm.toFixed(1), unit: "km", icon: "📍" },
                 { label: "Calories Burned", value: totalCalories.toLocaleString(), unit: "", icon: "🔥" },
