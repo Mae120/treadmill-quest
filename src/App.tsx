@@ -8,9 +8,10 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const defaultData = {
   goal: null,
-  sessions: [], // { date: "YYYY-MM-DD", duration: 30, km: 2.4, calories: 200, speed: 3, incline: 12 }
+  sessions: [], // { date: "YYYY-MM-DD", duration: 30, km: 2.4, calories: 200, speed: 3, incline: 12, unit: 'mph' }
   journeyId: "jeddah-makkah",
   onboardingDone: false,
+  unitPreference: "mph", // Default preference
 };
 
 async function loadData() {
@@ -138,15 +139,17 @@ function getTotalKm(sessions: any[]) {
   return sessions.reduce((a: any, s: any) => a + (s.km || 2.4), 0);
 }
 
-function calculateKm(duration: number, speed: number) {
+function calculateKm(duration: number, speed: number, unit: string) {
+  if (unit === 'km/h') {
+    return parseFloat(((speed * duration) / 60).toFixed(2));
+  }
   // Speed is in mph. Km = (speed * 1.60934) * (duration / 60)
   return parseFloat(((speed * 1.60934 * duration) / 60).toFixed(2));
 }
 
-function calculateCalories(duration: number, speed: number, incline: number) {
-  // Rough estimate for calorie burn on treadmill
-  // METs = (0.1 * speed_in_m_per_min) + (1.8 * speed_in_m_per_min * fractional_incline) + 3.5
-  const speedMpm = speed * 26.8224; // mph to meters per minute
+function calculateCalories(duration: number, speed: number, incline: number, unit: string) {
+  const speedInMph = unit === 'km/h' ? speed / 1.60934 : speed;
+  const speedMpm = speedInMph * 26.8224; // mph to meters per minute
   const mets = (0.1 * speedMpm) + (1.8 * speedMpm * (incline / 100)) + 3.5;
   const weightKg = 70; // Assumed default weight
   return Math.round((mets * weightKg * duration) / 60);
@@ -403,14 +406,25 @@ function CalendarMonth({ sessions }: { sessions: any[] }) {
   );
 }
 
-function LogSessionModal({ onLog, onClose }: { onLog: any, onClose: any }) {
+function LogSessionModal({ onLog, onClose, unitPreference, setUnitPreference }: { onLog: any, onClose: any, unitPreference: string, setUnitPreference: any }) {
   const [duration, setDuration] = useState(30);
-  const [speed, setSpeed] = useState(3.0);
+  const [speed, setSpeed] = useState(unitPreference === 'mph' ? 3.0 : 4.8);
   const [incline, setIncline] = useState(12);
   
   const presets = [10, 20, 30, 45, 60];
-  const km = calculateKm(duration, speed);
-  const cal = calculateCalories(duration, speed, incline);
+  const km = calculateKm(duration, speed, unitPreference);
+  const cal = calculateCalories(duration, speed, incline, unitPreference);
+
+  const toggleUnit = (newUnit: string) => {
+    if (newUnit === unitPreference) return;
+    // Convert speed when toggling
+    if (newUnit === 'km/h') {
+      setSpeed(parseFloat((speed * 1.60934).toFixed(1)));
+    } else {
+      setSpeed(parseFloat((speed / 1.60934).toFixed(1)));
+    }
+    setUnitPreference(newUnit);
+  };
 
   return (
     <div style={{
@@ -424,6 +438,20 @@ function LogSessionModal({ onLog, onClose }: { onLog: any, onClose: any }) {
         <h3 style={{ color: "#e8f5e9", fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Log a Session</h3>
         <p style={{ color: "#6b7280", fontSize: 13, marginBottom: 24 }}>Set your treadmill parameters</p>
         
+        {/* Unit Toggle */}
+        <div style={{ display: "flex", background: "rgba(255,255,255,0.04)", borderRadius: 12, padding: 4, marginBottom: 24 } as any}>
+          {['mph', 'km/h'].map((u) => (
+            <button key={u} onClick={() => toggleUnit(u)} style={{
+              flex: 1, padding: "8px 0", borderRadius: 10, border: "none", cursor: "pointer",
+              background: unitPreference === u ? "#4ade80" : "transparent",
+              color: unitPreference === u ? "#0a0a0f" : "#6b7280",
+              fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px"
+            } as any}>
+              {u}
+            </button>
+          ))}
+        </div>
+
         <div style={{ marginBottom: 20 } as any}>
           <p style={{ color: "#9ca3af", fontSize: 12, fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", marginBottom: 12 } as any}>
             Duration (min)
@@ -450,11 +478,11 @@ function LogSessionModal({ onLog, onClose }: { onLog: any, onClose: any }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 24 } as any}>
           <div>
             <p style={{ color: "#9ca3af", fontSize: 12, fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", marginBottom: 8 } as any}>
-              Speed (mph)
+              Speed ({unitPreference})
             </p>
             <div style={{ display: "flex", alignItems: "center", gap: 10 } as any}>
               <input 
-                type="number" step="0.1" min="0.1" max="15" value={speed} 
+                type="number" step="0.1" min="0.1" max="25" value={speed} 
                 onChange={(e) => setSpeed(parseFloat(e.target.value) || 0)}
                 style={{ 
                   background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
@@ -500,7 +528,7 @@ function LogSessionModal({ onLog, onClose }: { onLog: any, onClose: any }) {
           } as any}>
             Cancel
           </button>
-          <button onClick={() => onLog(duration, speed, incline)} style={{
+          <button onClick={() => onLog(duration, speed, incline, unitPreference)} style={{
             flex: 2, background: "#4ade80", color: "#0a0a0f",
             border: "none", borderRadius: 12, padding: 14, fontSize: 15, fontWeight: 800, cursor: "pointer"
           } as any}>
@@ -533,7 +561,13 @@ export default function TreadmillQuest() {
     saveData(updated);
   };
 
-  const handleLog = (duration: number, speed: number, incline: number) => {
+  const setUnitPreference = (unit: string) => {
+    const updated = { ...data, unitPreference: unit };
+    setData(updated);
+    saveData(updated);
+  };
+
+  const handleLog = (duration: number, speed: number, incline: number, unit: string) => {
     const todayStr = today();
     const alreadyToday = (data?.sessions || []).some((s: any) => s.date === todayStr);
     if (alreadyToday) {
@@ -546,8 +580,9 @@ export default function TreadmillQuest() {
       duration, 
       speed, 
       incline, 
-      km: calculateKm(duration, speed), 
-      calories: calculateCalories(duration, speed, incline) 
+      unit,
+      km: calculateKm(duration, speed, unit), 
+      calories: calculateCalories(duration, speed, incline, unit) 
     };
     const updated = { ...data, sessions: [...(data?.sessions || []), session] };
     setData(updated);
@@ -721,7 +756,14 @@ export default function TreadmillQuest() {
           </button>
         ))}
       </div>
-      {showLog && <LogSessionModal onLog={handleLog} onClose={() => setShowLog(false)} />}
+      {showLog && (
+        <LogSessionModal 
+          onLog={handleLog} 
+          onClose={() => setShowLog(false)} 
+          unitPreference={data.unitPreference || 'mph'}
+          setUnitPreference={setUnitPreference}
+        />
+      )}
     </div>
   );
 }
