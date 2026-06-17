@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 
+// ─── Persistent Storage Helpers ───────────────────────────────────────────────
 const STORAGE_KEY = "treadmill-quest-data";
 
 const defaultData = {
   goal: null,
-  sessions: [],
+  sessions: [], // { date: "YYYY-MM-DD", duration: 30, km: 2.4, calories: 200 }
   journeyId: "jeddah-makkah",
   onboardingDone: false,
 };
@@ -24,6 +25,7 @@ async function saveData(data: any) {
   } catch {}
 }
 
+// ─── Virtual Journeys ─────────────────────────────────────────────────────────
 const JOURNEYS = [
   {
     id: "jeddah-makkah",
@@ -71,6 +73,7 @@ const JOURNEYS = [
   },
 ];
 
+// ─── Utilities ────────────────────────────────────────────────────────────────
 const today = () => new Date().toISOString().split("T")[0];
 
 function getStreak(sessions: any[]) {
@@ -84,7 +87,7 @@ function getStreak(sessions: any[]) {
     current++;
     d.setDate(d.getDate() - 1);
   }
-  const sorted = [...dates].sort() as any[];
+  const sorted = Array.from(dates).sort() as any[];
   let longest = 0, run = 1;
   for (let i = 1; i < sorted.length; i++) {
     const prev = new Date(sorted[i - 1]) as any;
@@ -99,7 +102,6 @@ function getStreak(sessions: any[]) {
 
 function getMonthlyConsistency(sessions: any[]) {
   const now = new Date();
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const daysSoFar = now.getDate();
   const thisMonth = sessions.filter((s: any) => {
     const d = new Date(s.date);
