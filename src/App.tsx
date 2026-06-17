@@ -8,7 +8,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const defaultData = {
   goal: null,
-  sessions: [], // { date: "YYYY-MM-DD", duration: 30, km: 2.4, calories: 200 }
+  sessions: [], // { date: "YYYY-MM-DD", duration: 30, km: 2.4, calories: 200, speed: 3, incline: 12 }
   journeyId: "jeddah-makkah",
   onboardingDone: false,
 };
@@ -138,12 +138,18 @@ function getTotalKm(sessions: any[]) {
   return sessions.reduce((a: any, s: any) => a + (s.km || 2.4), 0);
 }
 
-function kmPerSession(duration: number) {
-  return parseFloat(((4.83 * duration) / 60).toFixed(2));
+function calculateKm(duration: number, speed: number) {
+  // Speed is in mph. Km = (speed * 1.60934) * (duration / 60)
+  return parseFloat(((speed * 1.60934 * duration) / 60).toFixed(2));
 }
 
-function calPerSession(duration: number) {
-  return Math.round((200 * duration) / 30);
+function calculateCalories(duration: number, speed: number, incline: number) {
+  // Rough estimate for calorie burn on treadmill
+  // METs = (0.1 * speed_in_m_per_min) + (1.8 * speed_in_m_per_min * fractional_incline) + 3.5
+  const speedMpm = speed * 26.8224; // mph to meters per minute
+  const mets = (0.1 * speedMpm) + (1.8 * speedMpm * (incline / 100)) + 3.5;
+  const weightKg = 70; // Assumed default weight
+  return Math.round((mets * weightKg * duration) / 60);
 }
 
 function OnboardingScreen({ onDone }: { onDone: any }) {
@@ -399,9 +405,12 @@ function CalendarMonth({ sessions }: { sessions: any[] }) {
 
 function LogSessionModal({ onLog, onClose }: { onLog: any, onClose: any }) {
   const [duration, setDuration] = useState(30);
+  const [speed, setSpeed] = useState(3.0);
+  const [incline, setIncline] = useState(12);
+  
   const presets = [10, 20, 30, 45, 60];
-  const km = kmPerSession(duration);
-  const cal = calPerSession(duration);
+  const km = calculateKm(duration, speed);
+  const cal = calculateCalories(duration, speed, incline);
 
   return (
     <div style={{
@@ -410,25 +419,65 @@ function LogSessionModal({ onLog, onClose }: { onLog: any, onClose: any }) {
     } as any}>
       <div style={{
         background: "#111318", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20,
-        padding: 28, width: "100%", maxWidth: 380
+        padding: 28, width: "100%", maxWidth: 400, maxHeight: "90vh", overflowY: "auto"
       } as any}>
         <h3 style={{ color: "#e8f5e9", fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Log a Session</h3>
-        <p style={{ color: "#6b7280", fontSize: 13, marginBottom: 24 }}>12% incline • 3 mph</p>
-        <p style={{ color: "#9ca3af", fontSize: 12, fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", marginBottom: 12 } as any}>
-          Duration
-        </p>
-        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" } as any}>
-          {presets.map((p) => (
-            <button key={p} onClick={() => setDuration(p)} style={{
-              background: duration === p ? "#4ade80" : "rgba(255,255,255,0.06)",
-              color: duration === p ? "#0a0a0f" : "#9ca3af",
-              border: "none", borderRadius: 10, padding: "8px 14px", fontSize: 14,
-              fontWeight: 700, cursor: "pointer"
-            } as any}>
-              {p}m
-            </button>
-          ))}
+        <p style={{ color: "#6b7280", fontSize: 13, marginBottom: 24 }}>Set your treadmill parameters</p>
+        
+        <div style={{ marginBottom: 20 } as any}>
+          <p style={{ color: "#9ca3af", fontSize: 12, fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", marginBottom: 12 } as any}>
+            Duration (min)
+          </p>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" } as any}>
+            {presets.map((p) => (
+              <button key={p} onClick={() => setDuration(p)} style={{
+                background: duration === p ? "#4ade80" : "rgba(255,255,255,0.06)",
+                color: duration === p ? "#0a0a0f" : "#9ca3af",
+                border: "none", borderRadius: 10, padding: "8px 14px", fontSize: 14,
+                fontWeight: 700, cursor: "pointer"
+              } as any}>
+                {p}m
+              </button>
+            ))}
+          </div>
+          <input 
+            type="range" min="1" max="120" value={duration} 
+            onChange={(e) => setDuration(parseInt(e.target.value))}
+            style={{ width: "100%", accentColor: "#4ade80" }}
+          />
         </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 24 } as any}>
+          <div>
+            <p style={{ color: "#9ca3af", fontSize: 12, fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", marginBottom: 8 } as any}>
+              Speed (mph)
+            </p>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 } as any}>
+              <input 
+                type="number" step="0.1" min="0.1" max="15" value={speed} 
+                onChange={(e) => setSpeed(parseFloat(e.target.value) || 0)}
+                style={{ 
+                  background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 10, padding: "10px", color: "#e8f5e9", width: "100%", fontWeight: 700
+                } as any}
+              />
+            </div>
+          </div>
+          <div>
+            <p style={{ color: "#9ca3af", fontSize: 12, fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", marginBottom: 8 } as any}>
+              Incline (%)
+            </p>
+            <input 
+              type="number" min="0" max="20" value={incline} 
+              onChange={(e) => setIncline(parseInt(e.target.value) || 0)}
+              style={{ 
+                background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 10, padding: "10px", color: "#e8f5e9", width: "100%", fontWeight: 700
+              } as any}
+            />
+          </div>
+        </div>
+
         <div style={{
           background: "rgba(74,222,128,0.06)", border: "1px solid rgba(74,222,128,0.15)",
           borderRadius: 12, padding: 16, marginBottom: 24,
@@ -443,6 +492,7 @@ function LogSessionModal({ onLog, onClose }: { onLog: any, onClose: any }) {
             <div style={{ color: "#4b5563", fontSize: 11, fontWeight: 600, letterSpacing: "1px", textTransform: "uppercase" } as any}>calories</div>
           </div>
         </div>
+
         <div style={{ display: "flex", gap: 12 } as any}>
           <button onClick={onClose} style={{
             flex: 1, background: "rgba(255,255,255,0.06)", color: "#9ca3af",
@@ -450,7 +500,7 @@ function LogSessionModal({ onLog, onClose }: { onLog: any, onClose: any }) {
           } as any}>
             Cancel
           </button>
-          <button onClick={() => onLog(duration)} style={{
+          <button onClick={() => onLog(duration, speed, incline)} style={{
             flex: 2, background: "#4ade80", color: "#0a0a0f",
             border: "none", borderRadius: 12, padding: 14, fontSize: 15, fontWeight: 800, cursor: "pointer"
           } as any}>
@@ -483,7 +533,7 @@ export default function TreadmillQuest() {
     saveData(updated);
   };
 
-  const handleLog = (duration: number) => {
+  const handleLog = (duration: number, speed: number, incline: number) => {
     const todayStr = today();
     const alreadyToday = (data?.sessions || []).some((s: any) => s.date === todayStr);
     if (alreadyToday) {
@@ -491,7 +541,14 @@ export default function TreadmillQuest() {
       setShowLog(false);
       return;
     }
-    const session = { date: todayStr, duration, km: kmPerSession(duration), calories: calPerSession(duration) };
+    const session = { 
+      date: todayStr, 
+      duration, 
+      speed, 
+      incline, 
+      km: calculateKm(duration, speed), 
+      calories: calculateCalories(duration, speed, incline) 
+    };
     const updated = { ...data, sessions: [...(data?.sessions || []), session] };
     setData(updated);
     saveData(updated);
@@ -587,7 +644,7 @@ export default function TreadmillQuest() {
                     {todayDone ? "Done ✓" : "Not yet"}
                   </h2>
                   <p style={{ color: "#4b5563", fontSize: 13, margin: "6px 0 0" } as any}>
-                    {todayDone ? "Streak: " + streak.current + " days 🔥" : "30 minutes · 12% incline · 3 mph"}
+                    {todayDone ? "Streak: " + streak.current + " days 🔥" : "Log your workout to advance"}
                   </p>
                 </div>
                 {!todayDone && (
